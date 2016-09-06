@@ -1,3 +1,29 @@
+stop()
+q('no')
+
+install.packages('Rcpp')
+install.packages('RcppArmadillo')
+install.packages('inline')
+library(Rcpp)
+library(RcppArmadillo)
+library(inline)
+source('~/.z.R')
+source('~/.h.R')
+
+
+n <- 5000
+m <- 200
+
+v <- matrix(c(rep(c(rep(1, n), rep(0, n)), m),
+              rep(c(rep(0, n), rep(1, n)), m)), n * 2)
+
+rw <- readRDS('~/rna2/a01-NMFEM_paper/d1-data_processing/x13-process_zeisel_data/temp.RDS')
+
+res <- znmf(rw, 7, 2000, 1e-6, 10, sqrt(.Machine$double.eps))
+res$H %>% zh
+res$W %>% zh
+
+
 kl_divergence <- function(a, b, lambda=sqrt(.Machine$double.eps)) {
   sum(a * log(a / (b + lambda) + lambda) - a + b)
 }
@@ -15,7 +41,7 @@ znmf <- function(v, k, niter=100, tol=1e-6, peek_interval=10, lambda=sqrt(.Machi
   last_error <- Inf
   for (i in 1:niter) {
     h <- h * (t(w) %*% (v / (w %*% h + lambda))) / colSums(w)
-    w <- w * ((v / (w %*% h + lambda)) %*% t(h)) / rowSums(h)
+    w <- sweep(w * ((v / (w %*% h + lambda)) %*% t(h)), 2, rowSums(h), `/`)
     if (i %% peek_interval == 0) {
       error <- kl_divergence(v, w %*% h)
       message(sprintf('(%d) error: %f; diff: %f', i, error, last_error - error))
@@ -33,13 +59,16 @@ znmf <- function(v, k, niter=100, tol=1e-6, peek_interval=10, lambda=sqrt(.Machi
   )
 }
 
+
 n <- 5000
 m <- 200
 
 v <- matrix(c(rep(c(rep(1, n), rep(0, n)), m),
         rep(c(rep(0, n), rep(1, n)), m)), n * 2)
 
-res <- znmf(v, 7, 300)
+res <- znmf(v, 2, 3000)
+
+
 saveRDS(res, 'res.RDS')
 res <- readRDS('res.RDS')
 
@@ -49,11 +78,29 @@ res$h %>% zh
 rwl %>% zh
 
 
-se <- readRDS('out-datasets/batchSE3.RDS')
+se <- readRDS('~/rna2/a01-NMFEM_paper/d1-data_processing/out-datasets/batchSE3.RDS')
 rwl <- log(se@assays$data$counts+1)
 dim(rwl)
 
-res <- znmf(rwl, 3, 3000)
+sourceCpp('../src/znmf.cpp')
+znmf2 <- function(v, k, niter=100, tol=1e-6, peek_interval=10, lambda=sqrt(.Machine$double.eps)) {
+  c_znmf(v, k, niter, tol, peek_interval, lambda)
+}
+
+microbenchmark::microbenchmark(
+ znmf(rwl, 2, 30),
+ znmf2(rwl, 2, 30),
+ times = 3
+)
+ 
+res <- znmf(rwl, 2, 30)
+res <- znmf2(rwl, 2, 30)
+
+res$w %>% zh
+res$h %>% zh
+cbind(rbind(matrix(rep(0, 4), 2), res$w),
+      rbind(res$h, rwl)) %>% zh
+print(proc.time() - time)
 
 errors <- res$errors %>%
   enframe('step', 'error') %>%
